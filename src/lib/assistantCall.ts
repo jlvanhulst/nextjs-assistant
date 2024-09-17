@@ -1,24 +1,62 @@
 // lib/assistantCall.ts
-
+"use server"
 import OpenAI from 'openai';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-
-interface FileUpload {
+class FileUpload {
   fileId?: string;
   filename: string;
-  extension?: string;
-  vision?: boolean;
-  retrieval?: boolean;
-}
 
+  // Optional properties to override computed values
+  private _vision?: boolean;
+  private _retrieval?: boolean;
+
+  constructor(
+    filename: string,
+    fileId?: string,
+    visionOverride?: boolean,
+    retrievalOverride?: boolean
+  ) {
+    this.filename = filename;
+    this.fileId = fileId;
+    this._vision = visionOverride;
+    this._retrieval = retrievalOverride;
+  }
+
+  // Getter for the file extension
+  get extension(): string {
+    const parts = this.filename.split('.');
+    return parts[parts.length - 1].toLowerCase();
+  }
+
+  // Getter to determine if the file is a vision (image) file
+  get vision(): boolean {
+    if (this._vision !== undefined) {
+      return this._vision;
+    }
+    const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff'];
+    return imageExtensions.includes(this.extension);
+  }
+
+  // Getter to determine if the file is for retrieval
+  get retrieval(): boolean {
+    if (this._retrieval !== undefined) {
+      return this._retrieval;
+    }
+    const retrievalExtensions = [
+      'c', 'cs', 'cpp', 'doc', 'docx', 'html', 'java', 'json', 'md', 'pdf',
+      'php', 'pptx', 'py', 'rb', 'tex', 'txt', 'css', 'js', 'sh', 'ts',
+    ];
+    return retrievalExtensions.includes(this.extension);
+  }
+}
 
 class AssistantCall {
   private client: OpenAI;
 
   constructor() {
-    this.client = new OpenAI({apiKey: process.env.OPENAI_API_KEY});
+    this.client = new OpenAI({apiKey: process.env.OPENAI_API_KEY, organization: process.env.OPENAI_ORGANIZATION, project: process.env.OPENAI_PROJECT});
   }
 
   // Retrieve assistant ID by name
@@ -59,7 +97,7 @@ class AssistantCall {
     content: string;
     tools?: any;
     metadata?: Record<string, any>;
-    files?: FileUpload[];
+    files?: string[] | FileUpload[];
     whenDone?: string | ((threadId: string) => void);
   }) {
     const {
@@ -122,12 +160,41 @@ class AssistantCall {
       return await this.processRun(run.id, thread, tools);
     }
   }
+  async getFileUploadById(fileId: string): Promise<FileUpload> {
+    try {
+      // Retrieve the file object from OpenAI
+      const file = await this.client.files.retrieve(fileId);
 
+      // Determine the purpose of the file
+      const purpose = file.purpose;
+      const filename = file.filename;
+
+      // Set vision and retrieval based on purpose
+      let visionOverride: boolean | undefined = undefined;
+      let retrievalOverride: boolean | undefined = undefined;
+
+      if (purpose === 'vision') {
+        visionOverride = true;
+        retrievalOverride = false;
+      } else if (purpose === 'assistants') {
+        visionOverride = false;
+        retrievalOverride = true;
+      }
+
+      // Create a new FileUpload instance with overrides
+      const fileUpload = new FileUpload(filename, file.id, visionOverride, retrievalOverride);
+
+      // Return the FileUpload instance
+      return fileUpload;
+    } catch (error: any) {
+      throw new Error(`Error retrieving file with ID ${fileId}: ${error.message}`);
+    }
+  }
   // Prepare thread with messages and attachments
   async prepThread(params: {
     threadId?: string;
     assistantId?: string;
-    files?: FileUpload[];
+    files?: string[]|FileUpload[];
     content: string;
     metadata?: Record<string, any>;
     assistantName?: string;
@@ -136,9 +203,19 @@ class AssistantCall {
 
     const visionFiles: FileUpload[] = [];
     const attachmentFiles: any[] = [];
+    let fileUploads: FileUpload[] = [];
 
-    if (files && files.length > 0) {
-      for (const file of files) {
+    if (files && typeof files[0] === 'string') {
+      // files is string[]
+      const fileIds = files as string[];
+      // Convert file IDs to FileUpload instances
+      fileUploads = await Promise.all(fileIds.map(id => this.getFileUploadById(id)));
+    } else {
+      // files is FileUpload[]
+      fileUploads = files as FileUpload[];
+    }
+    if (fileUploads && fileUploads.length > 0) {
+      for (const file of fileUploads) {
         if (file.vision) {
           visionFiles.push(file);
           continue;
@@ -168,14 +245,30 @@ class AssistantCall {
     });
 
     await this.addVisionFiles(thread.id, visionFiles);
-
     return thread;
   }
 
-  // Add vision files to the thread
-  async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
-    
+
+async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
+  for (const v of visionFiles) {
+    if (!v.fileId) {
+        throw new Error(`File ID is missing for vision file: ${v.filename}`);
+      }
+    await this.client.beta.threads.messages.create(threadId, {
+      role: 'user',
+      content: [
+        {
+          type: 'image_file',
+          image_file: {
+            file_id: v.fileId,
+            detail: 'high',
+          },
+        },
+      ],
+    });
   }
+}
+
 
   // Retrieve or create a thread
   async getThread(params: {
@@ -269,24 +362,26 @@ class AssistantCall {
   }
 
   // Process a single tool call
-  async processToolCall(toolCall: any, tools: any) {
-    let result;
-
+  async processToolCall(toolCall: any, tools: Record<string, Function>) {
+    let result: any;
+  
     try {
-      const args = JSON.parse(toolCall.function.arguments);
-      const functionName = toolCall.function.name;
-
+      const args = JSON.parse(toolCall.function.arguments); // Get the arguments for the function call
+      const functionName = toolCall.function.name; // Get the function name the assistant wants to call
+  
+      // Dynamically find the function in the tools object
       const func = tools[functionName];
-
+  
       if (!func) {
         result = `Function ${functionName} not supported`;
       } else {
+        // Call the tool function with the provided arguments
         result = await func(args);
       }
     } catch (e: any) {
       result = e.toString();
     }
-
+  
     return {
       tool_call_id: toolCall.id,
       output: result,
@@ -393,8 +488,24 @@ class AssistantCall {
       throw new Error('First content block is not of type text');
     }
   }
-
+  
+  async transcribeAudio(fileName: string): Promise<{ text: string }> {
+    try {
+      const fileStream = fs.createReadStream(fileName);
+      const response = await this.client.audio.transcriptions.create({
+        file: fileStream,
+        model: 'whisper-1' // Specify the Whisper model
+      });
+   
+      return { text: response.text };
+    } catch (error) {
+      console.error('Error during transcription:', error);
+      throw new Error('Error transcribing audio');
+    }
+   };
 
 }
+
+
 
 export default AssistantCall;// Upload a file to OpenA

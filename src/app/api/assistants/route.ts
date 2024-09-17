@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(assistantsMap); // Return the list of assistants as JSON
   } catch (error: unknown) {
     console.error('Error fetching assistants:', error);
-    return NextResponse.json({ error: 'Failed to fetch assistants' }, { status: 500 });
+    // need to return em
+    return NextResponse.json({ assistants: [] }, { status: 200 });
   }
 }
