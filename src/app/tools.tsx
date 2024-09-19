@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { JSDOM } from 'jsdom';
+import TurndownService from 'turndown';
+import sanitizeHtml from 'sanitize-html';
 import AssistantCall from '@/lib/assistantCall';
 const assistantCall = new AssistantCall();
 
@@ -13,17 +14,36 @@ interface WebScrapeParameters {
 }
 
 // Utility function to convert HTML to text
-async function htmlToText(html: string, ignore_links = false): Promise<string> {
-  const dom = new JSDOM(html);
-  const document = dom.window.document;
-  let text = document.body.textContent || '';
 
-  if (!ignore_links) {
-    const links = Array.from(document.querySelectorAll('a')).map((a) => a.href).join('\n');
-    text += `\nLinks:\n${links}`;
-  }
 
-  return text;
+function htmlToMarkdown(html: string): string {
+  // Sanitize the HTML to remove scripts and unwanted attributes
+  const cleanHtml = sanitizeHtml(html, {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat(['img', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']),
+    allowedAttributes: {
+      a: ['href', 'name', 'target', 'title'],
+      img: ['src', 'alt', 'title'],
+    },
+    // Disallow JavaScript in href/src attributes
+    allowedSchemes: ['http', 'https', 'mailto', 'tel'],
+    allowedSchemesByTag: {},
+    allowProtocolRelative: false,
+    transformTags: {
+      // Remove event handler attributes like onclick
+      '*': (tagName: string, attribs: Record<string, string>) => {
+        for (const attr in attribs) {
+          if (attr.startsWith('on')) {
+            delete attribs[attr];
+          }
+        }
+        return { tagName, attribs };
+      },
+    },
+  });
+
+  const turndownService = new TurndownService();
+  const markdown = turndownService.turndown(cleanHtml);
+  return markdown.trim();
 }
 
 // Webscrape function
@@ -40,7 +60,7 @@ export async function webscrape(params: WebScrapeParameters): Promise<string> {
       return `Failed to fetch the URL. Status code: ${response.status}`;
     }
 
-    let output = await htmlToText(response.data, params.ignore_links);
+    let output = await htmlToMarkdown(response.data);
 
     if (params.max_length && output.length > params.max_length) {
       output = output.slice(0, params.max_length);
@@ -132,9 +152,16 @@ export async function company_research(params: CompanyResearchParameters): Promi
     return 'An error occurred while researching the company.';
   }
 }
+
+async function runAfter(threadId: string) {
+  console.log('runAfter', threadId);
+  const result = await assistantCall.getThread({threadId: threadId});
+  console.log('result', result);
+}
 // Export all tools in a single object
 export const tools = {
   webscrape, 
   google_search,
-  company_research
+  company_research,
+  runAfter
 };

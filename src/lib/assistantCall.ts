@@ -4,6 +4,14 @@ import OpenAI from 'openai';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+
+export interface AssistantRequest {
+  content: string;
+  fileIds: string[];
+  whenDone: string;
+  metadata: Record<string, any>;
+}
+
 class FileUpload {
   fileId?: string;
   filename: string;
@@ -143,7 +151,12 @@ class AssistantCall {
         if (typeof whenDone === 'function') {
           whenDone(thread.id);
         } else {
+
           // Handle string-based function names if needed
+          const func = tools[whenDone];
+          if (func) {
+            func(thread.id);
+          }
         }
       });
 
