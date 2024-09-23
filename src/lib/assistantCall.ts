@@ -1,15 +1,26 @@
 // lib/assistantCall.ts
 "use server"
 import OpenAI from 'openai';
-import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import os from 'os';
+import fs from 'fs';
+// Create a variable to hold the loaded tools
+import { tools }  from '@/app/assistant_tools/tools';
+
+let allTools: Record<string, Function> | null = tools;
+
 
 export interface AssistantRequest {
   content: string;
   fileIds: string[];
   whenDone: string;
   metadata: Record<string, any>;
+}
+
+export interface AssistantResponse {
+  response: string;
+  statusCode: number;
+  threadId?: string;
 }
 
 class FileUpload {
@@ -60,11 +71,22 @@ class FileUpload {
   }
 }
 
+
+// check if a string is avalid function name in the general tool object
+export async function isFunctionName(str: string): Promise<boolean>   {
+  if (!allTools) {
+      return false;
+  }
+  return typeof allTools[str] === 'function';
+}
+
 class AssistantCall {
   private client: OpenAI;
+  private tools?: any;
 
-  constructor() {
+  constructor(tools?: any) {
     this.client = new OpenAI({apiKey: process.env.OPENAI_API_KEY, organization: process.env.OPENAI_ORGANIZATION, project: process.env.OPENAI_PROJECT});
+    this.tools = tools;
   }
 
   // Retrieve assistant ID by name
@@ -107,7 +129,7 @@ class AssistantCall {
     metadata?: Record<string, any>;
     files?: string[] | FileUpload[];
     whenDone?: string | ((threadId: string) => void);
-  }) {
+  }): Promise<AssistantResponse> {
     const {
       assistantId,
       assistantName,
@@ -141,37 +163,45 @@ class AssistantCall {
       assistantName,
     });
 
-    if (whenDone) {
-      const run = await this.client.beta.threads.runs.create(thread.id, {
-        assistant_id: resolvedAssistantId as string
+   // Encapsulate run processing logic into a promise
+  const runPromise = (async () => {
+    const run = await this.client.beta.threads.runs.createAndPoll(thread.id, {
+        assistant_id: resolvedAssistantId as string,
       });
+    // Process the run and return the result
+    const result = await this.processRun(run.id, thread);
+    return result;
+    })();
 
-      // Start processing in the background
-      this.processRun(run.id, thread, tools).then(() => {
+  if (whenDone) {
+    // Start processing in the background
+    void runPromise
+      .then((result) => {
         if (typeof whenDone === 'function') {
           whenDone(thread.id);
-        } else {
-
+        } else if (typeof whenDone === 'string') {
           // Handle string-based function names if needed
-          const func = tools[whenDone];
-          if (func) {
-            func(thread.id);
+          try {
+            this.toolFunction(whenDone, { threadId: thread.id, result });
+          } catch (e) {
+            console.error('Error calling whenDone:', e);
           }
         }
+      })
+      .catch((error) => {
+        console.error('Error processing run:', error);
       });
-
-      return {
-        response: `Thread ${thread.id} queued for execution`,
-        statusCode: 200,
-        threadId: thread.id,
-      };
-    } else {
-      const run = await this.client.beta.threads.runs.createAndPoll(thread.id, {
-        assistant_id: resolvedAssistantId as string
-      });
-
-      return await this.processRun(run.id, thread, tools);
-    }
+    // Return immediately
+    return {
+      response: `Thread ${thread.id} queued for execution`,
+      statusCode: 200,
+      threadId: thread.id,
+    };
+  } else {
+    // Await the run to complete and return the result
+    const result = await runPromise;
+    return result;
+  }
   }
   async getFileUploadById(fileId: string): Promise<FileUpload> {
     try {
@@ -316,7 +346,7 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
   }
 
   // Process the run and handle required actions
-  async processRun(runId: string, thread: any, tools: any) {
+  async processRun(runId: string, thread: any) {
     let run = await this.client.beta.threads.runs.retrieve(thread.id, runId);
 
     while (
@@ -328,8 +358,7 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
             run.required_action.submit_tool_outputs
           ) {
             const toolOutputs = await this.processToolCalls({
-              toolCalls: run.required_action.submit_tool_outputs.tool_calls,
-              tools,
+              toolCalls: run.required_action.submit_tool_outputs.tool_calls
             });
           
             run = await this.client.beta.threads.runs.submitToolOutputsAndPoll(
@@ -341,20 +370,20 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
             );
           } else {
             // Handle the case where required_action or submit_tool_outputs is null
-            throw new Error('Required action is missing necessary data.');
+            throw new Error('Required RUN action is missing necessary data: ' + String(run.required_action));
           }
     }
 
     if (run.status === 'completed') {
       const responseMessage = await this.getResponse(run.thread_id);
       return {
-        response: responseMessage,
+        response: responseMessage as string,
         statusCode: 200,
         threadId: thread.id,
       };
     } else {
       return {
-        response: run.last_error,
+        response: String(run.last_error) ,
         statusCode: 500,
         threadId: thread.id,
       };
@@ -362,12 +391,12 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
   }
 
   // Process all tool calls
-  async processToolCalls(params: { toolCalls: any[]; tools: any }) {
-    const { toolCalls, tools } = params;
+  async processToolCalls(params: { toolCalls: any[];  }) {
+    const { toolCalls } = params;
     const toolOutputs = [];
 
     for (const toolCall of toolCalls) {
-      const output = await this.processToolCall(toolCall, tools);
+      const output = await this.processToolCall(toolCall);
       toolOutputs.push(output);
     }
 
@@ -375,32 +404,46 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
   }
 
   // Process a single tool call
-  async processToolCall(toolCall: any, tools: Record<string, Function>) {
-    let result: any;
-  
+  async processToolCall(toolCall: any) {
+    let result: any; 
     try {
       const args = JSON.parse(toolCall.function.arguments); // Get the arguments for the function call
-      const functionName = toolCall.function.name; // Get the function name the assistant wants to call
-  
-      // Dynamically find the function in the tools object
-      const func = tools[functionName];
-  
-      if (!func) {
-        result = `Function ${functionName} not supported`;
-      } else {
-        // Call the tool function with the provided arguments
-        result = await func(args);
-      }
+      result =await this.toolFunction(toolCall.function.name, args);
     } catch (e: any) {
       result = e.toString();
     }
-  
     return {
       tool_call_id: toolCall.id,
       output: result,
     };
   }
 
+  // call the function with the given name and arguments will check this.tool object if defined
+  // otherwise will use the allTools object 
+  async  toolFunction(funcName: string, params: any): Promise<any> {
+
+    let tools = this.tools;
+    if (!tools)
+       if  (!allTools) {
+        throw new Error("allTools is not initialized - no tools available");   
+    } else {
+      tools = allTools;
+    }
+    const func = tools[funcName];
+    if (!func) {
+      throw new Error(`Function '${funcName}' not found in tools.`);
+    }
+    if (typeof func !== 'function') {
+      throw new Error(`'${funcName}' is not a function.`);
+    }
+    try {
+      const result = await func(params);
+      return result;
+    } catch (error ) {
+      const err = error as Error;
+      throw new Error(`Error executing function '${funcName}': ${err.message}`);
+    }
+  }
   async uploadFile(params: {
     fileContent: Buffer | string;
     filename: string;
@@ -521,4 +564,4 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
 
 
 
-export default AssistantCall;// Upload a file to OpenA
+export default AssistantCall;

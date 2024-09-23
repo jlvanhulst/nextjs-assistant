@@ -1,7 +1,6 @@
 // src/app/api/chat/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import AssistantCall from '@/lib/assistantCall';
-import { tools } from '@/app/tools'; // Import the entire tools module
+import AssistantCall, {isFunctionName} from '@/lib/assistantCall';
 const assistantCall = new AssistantCall();
 
 export async function POST(request: NextRequest) {
@@ -16,9 +15,7 @@ export async function POST(request: NextRequest) {
     const result = await assistantCall.newThreadAndRun({
       assistantId, // Use the assistantId provided by the request
       threadId,
-      content,
-      tools: tools, // Pass the tools object to the assistant
-    });
+      content    });
 
     return NextResponse.json({
       response: result.response,

@@ -2,7 +2,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import AssistantCall, { AssistantRequest } from '@/lib/assistantCall';
-import { tools } from '@/app/tools'; // Import the entire tools module
 
 const assistantCall = new AssistantCall();
 
@@ -21,7 +20,6 @@ export async function POST(
     const result = await assistantCall.newThreadAndRun({
       assistantName,
       content: data.content,
-      tools: tools,
       files: data.fileIds,
       whenDone: data.whenDone,
       metadata: data.metadata,

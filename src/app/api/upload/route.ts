@@ -2,7 +2,6 @@
 
 import { NextResponse } from 'next/server';
 import AssistantCall from '@/lib/assistantCall';
-import { tools } from '@/app/tools'; // Import the entire tools module
 
 export const runtime = 'nodejs'; // Optional: Specify the runtime if needed
 
@@ -47,7 +46,6 @@ export async function POST(request: Request) {
       threadId: threadId || undefined,
       content: 'file uploaded '+file.name, 
       files: [fileUpload], // Attach the uploaded file
-      tools: tools, // Pass the tools object to the assistant
     };
 
     // Start a new thread or continue the existing one
