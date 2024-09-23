@@ -98,7 +98,7 @@ async function handleSms(formData: FormData): Promise<NextResponse> {
 
   // ideally we keep track of threadId in the database for each user
   let threadId = await getThreadId(fromNumber);
-
+  console.log('from number', fromNumber, 'threadId', threadId);
   if (!threadId) {
     // no threadId, create a new thread
     const thread = await assistantCall.getThread({metadata: { from: fromNumber, to: toNumber }}); // Implement getThread to retrieve/create a new thread
@@ -118,6 +118,7 @@ async function handleSms(formData: FormData): Promise<NextResponse> {
 }
 
   async function sendSms(toNumber: string, content: string, fromNumber: string) {
+    console.log('sending sms to', toNumber, 'content', content, 'from', fromNumber);
   const message = await client.messages.create({
   body: content,
   from: process.env.TWILIO_PHONE_NUMBER as string,
@@ -154,7 +155,7 @@ async function handleTranscription(formData: FormData): Promise<NextResponse> {
 
     const audioBuffer = await recordingResponse.arrayBuffer();
     // save the audio to a file with unique temporary name that includes the fromNumber
-    const tempFileName = `tempfile_${fromNumber}_${Date.now()}.wav`;
+    const tempFileName = `/tmp/tempfile_${fromNumber}_${Date.now()}.wav`;
     fs.writeFileSync(tempFileName, Buffer.from(audioBuffer));
 
     // Transcribe the audio using OpenAI's Whisper model
@@ -200,7 +201,7 @@ async function respondToVoicemail(transcription: string, user: User ) {
 
 async function runAfter(threadId?: string) {
   if (!threadId) return;
-
+  console.log('running after for threadId', threadId);
   const assistantCall = new AssistantCall();
   const thread = await assistantCall.getThread({threadId: threadId});
   const metadata = thread.metadata as { from: string, to: string };
