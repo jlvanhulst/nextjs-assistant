@@ -9,12 +9,16 @@ import { tools }  from '@/lib/assistant_tools/tools';
 
 let allTools: Record<string, Function> | null = tools;
 
-
+// Content is the only required field, contains the request. 
+// fileIds is an array of (openaifile ids to be attached to the request (they needs to uploaded already!)
+// whenDone is a string with or function to be called when the assistant is done. If called from api the string function
+// will have to be present in the tools object.
+// metadata is an optional set of key value pairs to be attached to the thread object.
 export interface AssistantRequest {
   content: string;
-  fileIds: string[];
-  whenDone: string;
-  metadata: Record<string, any>;
+  fileIds?: string[];
+  whenDone?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface AssistantResponse {
@@ -23,6 +27,8 @@ export interface AssistantResponse {
   threadId?: string;
 }
 
+// FileUpload is a class to hold the file information and provide the vision and retrieval flags
+// if not set in the constructor they will be computed from the file extension
 class FileUpload {
   fileId?: string;
   filename: string;
@@ -119,7 +125,7 @@ class AssistantCall {
     }
   }
 
-  // Main function to run a thread
+  // Main function to create a new thread and run the assistant
   async newThreadAndRun(params: {
     assistantId?: string;
     assistantName?: string;

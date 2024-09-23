@@ -2,7 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import AssistantCall, {isFunctionName} from '@/lib/assistantCall';
 const assistantCall = new AssistantCall();
-
+// This is the chat endpoint, it creates a new thread when needed and runs the assistant
+// if threadId is not provided a new thread is created, if it is provided a message is added to the thread
 export async function POST(request: NextRequest) {
   try {
     const { content, threadId, assistantId } = await request.json();
