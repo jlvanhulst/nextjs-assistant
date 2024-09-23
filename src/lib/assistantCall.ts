@@ -5,7 +5,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 // Create a variable to hold the loaded tools
-import { tools }  from '@/app/assistant_tools/tools';
+import { tools }  from '@/lib/assistant_tools/tools';
 
 let allTools: Record<string, Function> | null = tools;
 
