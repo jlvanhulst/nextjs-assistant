@@ -164,9 +164,9 @@ async function handleSms(formData: FormData): Promise<NextResponse> {
     files: fileUploads, // Include the uploaded files
   };
 
-  // Start the assistant task
-  await assistantCall.newThreadAndRun(assistantRequest);
-
+  // Start the assistant task, send the sms when done - but return immediately 
+  const result = await assistantCall.newThreadAndRun(assistantRequest);
+  console.log('assistant result', result);
   return NextResponse.json({ status: 'success', response: 'SMS received' }, { status: 200 });
 }
   async function sendSms(toNumber: string, content: string, fromNumber: string) {
@@ -261,6 +261,7 @@ async function runAfter(threadId?: string) {
   const message = await assistantCall.getResponse(threadId);
 
   await sendSms(metadata.from, message, metadata.to);
+  
 }
 
 
