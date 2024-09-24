@@ -2,9 +2,20 @@
 /* 
 Very simple demo of how to use the assistantCall module to handle incoming calls and transcribe voicemails and
 answer incoming SMS 
-
 */
+// Import Prisma Client
+import fetch from 'node-fetch';
 
+import { PrismaClient } from '@prisma/client';
+import { v4 as uuidv4 } from 'uuid'; // For generating thread IDs
+import path from 'path';
+import os from 'os';
+// Initialize Prisma Client
+const prisma = new PrismaClient();
+import type { User } from '@prisma/client'
+
+// Constants
+const THREAD_EXPIRATION_DAYS = 60;
 import { NextRequest, NextResponse } from 'next/server';
 import AssistantCall  from '@/lib/assistantCall';
 import twilio from 'twilio';
@@ -15,11 +26,7 @@ import { CallInstance } from 'twilio/lib/rest/insights/v1/call';
 const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
 const assistantCall = new AssistantCall();
 
-interface User {
-  name: string;
-  phoneNumber: string;
-  email: string;
-}
+
 
 export async function POST(request: NextRequest, { params }: { params: { path: string[] } }) {
   const subPath = '/' + (params.path || []).join('/');
@@ -38,10 +45,13 @@ export async function POST(request: NextRequest, { params }: { params: { path: s
       return NextResponse.json({ error: 'Invalid endpoint' }, { status: 404 });
   }
 }
-async function lookupUserByPhone(phoneNumber: string): Promise<User> {
+async function lookupUserByPhone(phoneNumber: string): Promise<User | null> {
   // Implement lookupUserByPhone to retrieve user details from your database
   // return null if the user is not allowed to use the service
-  return { name: 'John Doe', phoneNumber: phoneNumber, email: 'john.doe@example.com' };
+  const user = await prisma.user.findUnique({
+    where: { phone: phoneNumber },
+  });
+  return user;
 }
 // Handler for '/in' sub-route
 async function handleIncomingCall(formData: FormData): Promise<NextResponse> {
@@ -85,38 +95,80 @@ async function handleIncomingCall(formData: FormData): Promise<NextResponse> {
 }
 
 // Handler for '/sms' sub-route
+// Update your handleSms function
 async function handleSms(formData: FormData): Promise<NextResponse> {
   const fromNumber = formData.get('From') as string | null;
   const message = formData.get('Body') as string | null;
   const toNumber = formData.get('To') as string | null;
+  const numMedia = parseInt(formData.get('NumMedia') as string) || 0;
 
-  if (!fromNumber || !message || !toNumber) {
+  if (!fromNumber || !toNumber) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
 
   const assistantCall = new AssistantCall();
 
-  // ideally we keep track of threadId in the database for each user
+  // Retrieve or create threadId
   let threadId = await getThreadId(fromNumber);
-  console.log('from number', fromNumber, 'threadId', threadId);
   if (!threadId) {
-    // no threadId, create a new thread
-    const thread = await assistantCall.getThread({metadata: { from: fromNumber, to: toNumber }}); // Implement getThread to retrieve/create a new thread
-    setThreadId(fromNumber, thread.id);
+    const thread = await assistantCall.getThread({ metadata: { from: fromNumber, to: toNumber } });
+    await setThreadId(fromNumber, thread.id);
     threadId = thread.id;
   }
 
-  // Start the assistant task
-  assistantCall.newThreadAndRun({
+  // Collect media files if any
+  const mediaFiles: { filename: string; fileContent: Buffer }[] = [];
+
+  for (let i = 0; i < numMedia; i++) {
+    const mediaUrl = formData.get(`MediaUrl${i}`) as string;
+    const mediaContentType = formData.get(`MediaContentType${i}`) as string;
+
+    if (mediaUrl && mediaContentType) {
+      try {
+        const extension = mediaContentType.split('/')[1] || 'dat';
+        const filename = `media_${Date.now()}_${i}.${extension}`;
+        const response = await fetch(mediaUrl, { headers: {
+            Authorization: 'Basic ' + Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64'),
+          }});
+        const buffer = await response.buffer();
+        console.log('downloaded media', filename, mediaUrl, mediaContentType, buffer.length);
+        mediaFiles.push({ filename, fileContent: buffer });
+      } catch (error) {
+        console.error('Error downloading media:', error);
+        // Handle the error as needed
+      }
+    }
+  }
+
+  // Upload media files to OpenAI (if applicable)
+  const fileUploads = [];
+  for (const media of mediaFiles) {
+    try {
+      const fileUpload = await assistantCall.uploadFile({
+        fileContent: media.fileContent,
+        filename: media.filename,
+      });
+      fileUploads.push(fileUpload);
+    } catch (error) {
+      console.error('Error uploading file to OpenAI:', error);
+      // Handle the error as needed
+    }
+  }
+
+  // Prepare the content for the assistant call
+  const assistantRequest = {
     assistantName: 'Text Responder',
-    content: message,
+    content: message || '', // Use an empty string if message is null
     whenDone: runAfter,
     threadId: threadId,
-  });
+    files: fileUploads, // Include the uploaded files
+  };
+
+  // Start the assistant task
+  await assistantCall.newThreadAndRun(assistantRequest);
 
   return NextResponse.json({ status: 'success', response: 'SMS received' }, { status: 200 });
 }
-
   async function sendSms(toNumber: string, content: string, fromNumber: string) {
     console.log('sending sms to', toNumber, 'content', content, 'from', fromNumber);
   const message = await client.messages.create({
@@ -187,7 +239,7 @@ async function respondToVoicemail(transcription: string, user: User ) {
   // but what we are really waiting for is the multi modal assistnat that will pick up the call and stream
   // with transcription! 
   const assistantCall = new AssistantCall();
-  const thread = await assistantCall.getThread({metadata: { from: user.phoneNumber, to: process.env.TWILIO_PHONE_NUMBER as string }}); // Implement getThread to retrieve/create a new thread
+  const thread = await assistantCall.getThread({metadata: { from: user.phone, to: process.env.TWILIO_PHONE_NUMBER as string }}); // Implement getThread to retrieve/create a new thread
   await assistantCall.newThreadAndRun({
     assistantName: 'Text Responder',
     content: transcription,
@@ -214,15 +266,43 @@ async function runAfter(threadId?: string) {
 
 
 // this is a DEMO solution - the map is lost on restart of the server and also not scale if there are more server instances etc.
-
-const threadIdMap = new Map<string, string>();
-
 async function getThreadId(fromNumber: string): Promise<string | null> {
-  // Retrieve the threadId for a given phone number or null if not found
-  return threadIdMap.get(fromNumber) || null;
+  const phoneNumber = fromNumber.trim();
+  const now = new Date();
+  const expirationDate = new Date(
+    now.getTime() - THREAD_EXPIRATION_DAYS * 24 * 60 * 60 * 1000
+  );
+
+  // Find the user by phone number
+  const user = await prisma.user.findUnique({
+    where: { phone: phoneNumber },
+  });
+
+  if (user && user.threadid && user.thread_created_at > expirationDate) {
+    // Thread is still valid
+    return user.threadid;
+  } else {
+    // Thread expired or doesn't exist
+    return null; // Indicate that there's no valid thread
+  }
 }
 
+// Function to set threadId for a phone number
 async function setThreadId(fromNumber: string, threadId: string) {
-  // Store the threadId for future use
-  threadIdMap.set(fromNumber, threadId);
+  const phoneNumber = fromNumber.trim();
+  const now = new Date();
+
+  // Update the user's thread ID and thread_created_at
+  await prisma.user.upsert({
+    where: { phone: phoneNumber },
+    update: {
+      threadid: threadId,
+      thread_created_at: now,
+    },
+    create: {
+      phone: phoneNumber,
+      threadid: threadId,
+      thread_created_at: now,
+    },
+  });
 }
