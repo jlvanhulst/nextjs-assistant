@@ -5,7 +5,7 @@ answer incoming SMS
 */
 // Import Prisma Client
 import fetch from 'node-fetch';
-
+import { waitUntil } from '@vercel/functions';
 import { PrismaClient } from '@prisma/client';
 
 // Initialize Prisma Client
@@ -252,19 +252,19 @@ async function respondToVoicemail(transcription: string, user: User ) {
 async function runAfter(threadId?: string) {
   if (!threadId) return;
   console.log('running after for threadId', threadId);
-  const assistantCall = new AssistantCall();
-  const thread = await assistantCall.getThread({threadId: threadId});
-  const metadata = thread.metadata as { from: string, to: string };
+  waitUntil( (async () => {
+    const assistantCall = new AssistantCall();
+    const thread = await assistantCall.getThread({threadId: threadId});
+    const metadata = thread.metadata as { from: string, to: string };
 
   const message = await assistantCall.getResponse(threadId);
 
   await sendSms(metadata.from, message, metadata.to);
 
+})())
 }
 
 
-
-// this is a DEMO solution - the map is lost on restart of the server and also not scale if there are more server instances etc.
 async function getThreadId(fromNumber: string): Promise<string | null> {
   const phoneNumber = fromNumber.trim();
   const now = new Date();
