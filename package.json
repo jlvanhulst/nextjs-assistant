@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.19.1",
+    "@vercel/functions": "^1.4.1",
     "@vercel/postgres": "^0.10.0",
     "axios": "^1.7.7",
     "marked": "^14.1.2",

@@ -6,7 +6,7 @@ import os from 'os';
 import fs from 'fs';
 // Create a variable to hold the loaded tools
 import { tools }  from '@/lib/assistant_tools/tools';
-
+import { waitUntil } from '@vercel/functions';
 let allTools: Record<string, Function> | null = tools;
 
 // Content is the only required field, contains the request. 
@@ -182,7 +182,8 @@ class AssistantCall {
   if (whenDone) {
     // Start processing in the background
     console.log('whenDone is set for thread ' + thread.id + ' - will call whenDone when run is complete typeof whenDone is ' + typeof whenDone);
-    void runPromise
+    waitUntil(
+      runPromise
       .then((result) => {
         if (typeof whenDone === 'function') {
           console.log('calling whenDone function');
@@ -198,13 +199,14 @@ class AssistantCall {
       })
       .catch((error) => {
         console.error('Error processing run:', error);
-      });
+      }));
     // Return immediately
     return {
       response: `Thread ${thread.id} queued for execution`,
       statusCode: 200,
       threadId: thread.id,
     };
+  
   } else {
     // Await the run to complete and return the result
     const result = await runPromise;

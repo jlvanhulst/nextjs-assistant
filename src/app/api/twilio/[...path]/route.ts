@@ -7,9 +7,7 @@ answer incoming SMS
 import fetch from 'node-fetch';
 
 import { PrismaClient } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid'; // For generating thread IDs
-import path from 'path';
-import os from 'os';
+
 // Initialize Prisma Client
 const prisma = new PrismaClient();
 import type { User } from '@prisma/client'
@@ -261,7 +259,7 @@ async function runAfter(threadId?: string) {
   const message = await assistantCall.getResponse(threadId);
 
   await sendSms(metadata.from, message, metadata.to);
-  
+
 }
 
 
