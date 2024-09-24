@@ -184,7 +184,7 @@ class AssistantCall {
     console.log('whenDone is set for thread ' + thread.id + ' - will call whenDone when run is complete typeof whenDone is ' + typeof whenDone);
     waitUntil(
       runPromise
-      .then((result) => {
+      .then(async (result) => {
         if (typeof whenDone === 'function') {
           console.log('calling whenDone function');
           whenDone(thread.id);
