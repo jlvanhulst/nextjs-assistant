@@ -181,9 +181,11 @@ class AssistantCall {
 
   if (whenDone) {
     // Start processing in the background
+    console.log('whenDone is set for thread ' + thread.id + ' - will call whenDone when run is complete');
     void runPromise
       .then((result) => {
         if (typeof whenDone === 'function') {
+          console.log('calling whenDone function');
           whenDone(thread.id);
         } else if (typeof whenDone === 'string') {
           // Handle string-based function names if needed
@@ -556,7 +558,10 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
       const fileStream = fs.createReadStream(fileName);
       const response = await this.client.audio.transcriptions.create({
         file: fileStream,
-        model: 'whisper-1' // Specify the Whisper model
+        model: 'whisper-1', // Specify the Whisper model
+        response_format: 'text',
+        language: 'en',
+        temperature: 0.2,
       });
    
       return { text: response.text };
