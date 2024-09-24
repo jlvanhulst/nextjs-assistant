@@ -181,7 +181,7 @@ class AssistantCall {
 
   if (whenDone) {
     // Start processing in the background
-    console.log('whenDone is set for thread ' + thread.id + ' - will call whenDone when run is complete');
+    console.log('whenDone is set for thread ' + thread.id + ' - will call whenDone when run is complete typeof whenDone is ' + typeof whenDone);
     void runPromise
       .then((result) => {
         if (typeof whenDone === 'function') {
