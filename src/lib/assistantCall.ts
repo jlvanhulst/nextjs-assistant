@@ -325,7 +325,7 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
 
   // Retrieve or create a thread
   async getThread(params: {
-    threadId?: string;
+    threadId?: string|null;
     assistantName?: string;
     metadata?: Record<string, any>;
   }) {

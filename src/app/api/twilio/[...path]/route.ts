@@ -320,7 +320,8 @@ async function getCallerPhoneNumber(callSid: string): Promise<string> {
 async function respondToVoicemail(transcription: string, user: User ) {
 
   const assistantCall = new AssistantCall();
-  const thread = await assistantCall.getThread({metadata: { from: user.phone, to: process.env.TWILIO_PHONE_NUMBER as string }}); // Implement getThread to retrieve/create a new thread
+
+  const thread = await assistantCall.getThread({threadId: user.threadid, metadata: { from: user.phone, to: process.env.TWILIO_PHONE_NUMBER as string }}); // Implement getThread to retrieve/create a new thread
   await assistantCall.newThreadAndRun({
     assistantName: 'Text Responder',
     content: transcription,
