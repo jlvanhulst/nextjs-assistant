@@ -13,7 +13,8 @@ easily switch between local testing and Vercel/production.
 import fetch from 'node-fetch';
 import { waitUntil } from '@vercel/functions';
 import { PrismaClient } from '@prisma/client';
-
+import path from 'path';
+import os from 'os';
 // Initialize Prisma Client
 const prisma = new PrismaClient();
 import type { User } from '@prisma/client'
@@ -269,18 +270,24 @@ async function handleTranscription(formData: FormData): Promise<NextResponse> {
     if (!recordingResponse.ok) {
       throw new Error('Error fetching recording');
     }
-
-    const audioBuffer = await recordingResponse.arrayBuffer();
+    const audioBuffer = await recordingResponse.buffer();
     // save the audio to a file with unique temporary name that includes the fromNumber
-    const tempFileName = `/tmp/tempfile_${fromNumber}_${Date.now()}.wav`;
-    fs.writeFileSync(tempFileName, Buffer.from(audioBuffer));
+    const fileName = `tempfile_${fromNumber}_${Date.now()}.wav`;
+    const tempFile = path.join(os.tmpdir(), fileName);
+    await fs.promises.writeFile(tempFile, audioBuffer);
+  
+    fs.writeFileSync(tempFile, Buffer.from(audioBuffer));
 
     // Transcribe the audio using OpenAI's Whisper model
-    const transcription = await assistantCall.transcribeAudio(tempFileName);
+    const transcription = await assistantCall.transcribeAudio(tempFile);
     //delete the temp file
-    fs.unlinkSync(tempFileName);
+    fs.unlinkSync(tempFile);
     // Send the transcription to the user
-    await respondToVoicemail(transcription.text, user);
+    if (transcription && transcription.length > 0) {
+      await respondToVoicemail(transcription, user);
+    } else {
+      console.log('no transcription text');
+    }
 
     return NextResponse.json({ status: 'success', response: 'Transcription received' }, { status: 200 });
   } catch (error) {

@@ -555,18 +555,16 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
     }
   }
   
-  async transcribeAudio(fileName: string): Promise<{ text: string }> {
+  async transcribeAudio(fileName: string): Promise< string > {
     try {
       const fileStream = fs.createReadStream(fileName);
       const response = await this.client.audio.transcriptions.create({
         file: fileStream,
         model: 'whisper-1', // Specify the Whisper model
-        response_format: 'text',
         language: 'en',
         temperature: 0.2,
-      });
-   
-      return { text: response.text };
+      }) ;
+      return response.text as string;
     } catch (error) {
       console.error('Error during transcription:', error);
       throw new Error('Error transcribing audio');
