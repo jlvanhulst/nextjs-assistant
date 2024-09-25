@@ -1,7 +1,13 @@
 // src/app/api/twilio/route.ts
 /* 
-Very simple demo of how to use the assistantCall module to handle incoming calls and transcribe voicemails and
-answer incoming SMS 
+Simple demo of how to use the assistantCall module to handle incoming calls and transcribe voicemails and
+answer incoming SMS including media.
+Setup your twilio account so that the webhook url for incoming calls and SMS is POST to /api/twilio/in and POST /api/twilio/sms
+for messages.
+
+(Tip: ceate a TwiML 'app' (which is really just a set of URLS) for both Local and Vercel/production URLS that way you can
+easily switch between local testing and Vercel/production.
+
 */
 // Import Prisma Client
 import fetch from 'node-fetch';
@@ -29,18 +35,58 @@ const assistantCall = new AssistantCall();
 export async function POST(request: NextRequest, { params }: { params: { path: string[] } }) {
   const subPath = '/' + (params.path || []).join('/');
 
-  // Parse the form data
-  const formData = await request.formData();
-  
   switch (subPath) {
     case '/in':
+      const formData = await request.formData();
       return handleIncomingCall(formData);
     case '/sms':
-      return handleSms(formData);
+      const smsFormData = await request.formData();
+      return handleSms(smsFormData);
     case '/transcribe':
-      return handleTranscription(formData);
+      const transcribeFormData = await request.formData();
+      return handleTranscription(transcribeFormData);
+    case '/adduser':
+      return handleAddUser(request);
     default:
       return NextResponse.json({ error: 'Invalid endpoint' }, { status: 404 });
+  }
+}
+
+
+// New handler function to add a user
+async function handleAddUser(request: NextRequest): Promise<NextResponse> {
+  try {
+    // Parse JSON body
+    const data = await request.json();
+
+    const { name, phone, email } = data;
+
+    // Validate input
+    if (!name || !phone || !email) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    // Check if the user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { phone },
+    });
+
+    if (existingUser) {
+      return NextResponse.json({ error: 'User already exists' }, { status: 400 });
+    }
+    // Create new user
+    const user = await prisma.user.create({
+      data: {
+        name,
+        phone,
+        email,
+      },
+    });
+
+    return NextResponse.json({ status: 'success', user }, { status: 201 });
+  } catch (error) {
+    console.error('Error adding user:', error);
+    return NextResponse.json({ error: 'Error adding user' }, { status: 500 });
   }
 }
 async function lookupUserByPhone(phoneNumber: string): Promise<User | null> {
@@ -51,7 +97,16 @@ async function lookupUserByPhone(phoneNumber: string): Promise<User | null> {
   });
   return user;
 }
-// Handler for '/in' sub-route
+
+/* 
+handles incoming calls. Two steps: 
+First determine if the user is allowed to use the service. LookupUserByPhone() will return null if not.
+Add a user to the user table to allow calls from that number. Number must match callerid (ie +19543334444) 
+
+Next we present a leave a message option and collect the voicemail.
+We will receive a new incoming api call when the voicemail is complete.
+
+*/
 async function handleIncomingCall(formData: FormData): Promise<NextResponse> {
   const direction = formData.get('Direction') as string | null;
   const fromNumber = formData.get('From') as string | null;
@@ -92,8 +147,13 @@ async function handleIncomingCall(formData: FormData): Promise<NextResponse> {
   }
 }
 
-// Handler for '/sms' sub-route
-// Update your handleSms function
+/* 
+handles incoming SMS messages including media attachments. Will use the incoming number to find an existing thread
+or create one. Please note: text message and voicemail from the same number are treated as one thread. 
+
+Note: this function has a hardcoded Assistant Name 'Text Responder' that will be used to answer the message
+
+*/
 async function handleSms(formData: FormData): Promise<NextResponse> {
   const fromNumber = formData.get('From') as string | null;
   const message = formData.get('Body') as string | null;
@@ -106,7 +166,7 @@ async function handleSms(formData: FormData): Promise<NextResponse> {
 
   const assistantCall = new AssistantCall();
 
-  // Retrieve or create threadId
+  // Retrieve or create threadId based on fromNumber. 
   let threadId = await getThreadId(fromNumber);
   if (!threadId) {
     const thread = await assistantCall.getThread({ metadata: { from: fromNumber, to: toNumber } });
@@ -164,10 +224,14 @@ async function handleSms(formData: FormData): Promise<NextResponse> {
 
   // Start the assistant task, send the sms when done - but return immediately 
   const result = await assistantCall.newThreadAndRun(assistantRequest);
-  console.log('assistant result', result);
   return NextResponse.json({ status: 'success', response: 'SMS received' }, { status: 200 });
 }
-  async function sendSms(toNumber: string, content: string, fromNumber: string) {
+/*
+sends an SMS message
+to do: add media support
+*/
+async function sendSms(toNumber: string, content: string, fromNumber: string) {
+  
     console.log('sending sms to', toNumber, 'content', content, 'from', fromNumber);
   const message = await client.messages.create({
   body: content,
@@ -176,7 +240,10 @@ async function handleSms(formData: FormData): Promise<NextResponse> {
 });  
 }
 
-// Handler for '/transcribe' sub-route
+/*
+ retrieve and transcibe a voicemail and respond (by message) to the caller
+
+*/ 
 async function handleTranscription(formData: FormData): Promise<NextResponse> {
   const recordingUrl = formData.get('RecordingUrl') as string | null;
   const callSid = formData.get('CallSid') as string | null;
@@ -222,7 +289,11 @@ async function handleTranscription(formData: FormData): Promise<NextResponse> {
   }
 }
 
+/*
+  get the caller phone number from the call sid
+*/
 async function getCallerPhoneNumber(callSid: string): Promise<string> {
+
   try {
     const call = await client.calls(callSid).fetch();
     return call.from;
@@ -232,10 +303,15 @@ async function getCallerPhoneNumber(callSid: string): Promise<string> {
   }
 }
 
+  /* for now we respond by text - we could also consider different assistant and then a call 
+   but what we are really waiting for is the multi modal assistnat that will pick up the call and stream
+   with transcription! 
+
+   Note uses a hardcoded assistant named 'Text Responder'
+   The metadata are used in the 'whenDone' callback to send the message back to the original sender
+  */
 async function respondToVoicemail(transcription: string, user: User ) {
-  // for now we respond by text - we could also consider different assistant and then a call 
-  // but what we are really waiting for is the multi modal assistnat that will pick up the call and stream
-  // with transcription! 
+
   const assistantCall = new AssistantCall();
   const thread = await assistantCall.getThread({metadata: { from: user.phone, to: process.env.TWILIO_PHONE_NUMBER as string }}); // Implement getThread to retrieve/create a new thread
   await assistantCall.newThreadAndRun({

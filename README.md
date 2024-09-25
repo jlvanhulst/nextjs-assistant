@@ -1,4 +1,9 @@
-This app has an Assistant wrapper module that makes it super easy to run OpenAI Assistants in your Nextjs app (Note: the focus here is on 'agents' not CHAT. If you're looking for a streaming chat solution, this is not it) the chat implementation is to easily check your function calls and nested assistant calls.
+This app has an Assistant wrapper module that makes it super easy to run OpenAI Assistants in your Nextjs app (on Vercel)
+
+The Vercel specific part is the use of waitUntil function that is used to support starting an Assistant run while
+and a 'whenDone' function that is called after the Assistant run is complete. 
+
+(Note: the focus here is on 'agents' not CHAT. If you're looking for a streaming chat solution, this is not it) the chat implementation is to easily check your function calls and nested assistant calls.
 
 /chat demo is for the included 'assistantCall' module, which is meant to be an OpenAI Assistant 'runner'
 It will show all availabe assistants for the API key and let you select one to run against the chat interface.
@@ -17,15 +22,13 @@ First, run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+
 ```
 
 in .env put at least your OPENAI_API_KEY - also supported are OPENAI_ORG_ID and OPENAI_PROJECT_ID (if you are using a service account)
+
+This new version now uses Prisma as ORM and Postgres as DB - so you need to have a Postgres DB and the DB URL in your .env
+POSTGRES_PRISMA_URL= ...
 
 This version only implements a (non-streaming) chat interface but you can already do all the examples from the python version,
 I just haven't created the interface for it yet. I will add a few more integrations soon and example soon.
