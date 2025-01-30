@@ -425,7 +425,7 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
 
   // call the function with the given name and arguments will check this.tool object if defined
   // otherwise will use the allTools object 
-  async toolFunction(funcName: string, params: any): Promise<any> {
+  async toolFunction(funcName: string, params: any): Promise<string> {
     try {
       const response = await axios.post("https://valorventures.ngrok.dev/api/function/", {
         function: funcName,
@@ -435,7 +435,7 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
           'Authorization': `Bearer ${process.env.VIC_API_BEARER_TOKEN}`
         }
       });
-      return response.data;
+      return typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
     } catch (error) {
       const err = error as Error;
       throw new Error(`Error calling external function '${funcName}': ${err.message}`);
