@@ -430,6 +430,10 @@ async addVisionFiles(threadId: string, visionFiles: FileUpload[]) {
       const response = await axios.post("https://valorventures.ngrok.dev/api/function/", {
         function: funcName,
         params: params
+      }, {
+        headers: {
+          'Authorization': `Bearer ${process.env.VIC_API_BEARER_TOKEN}`
+        }
       });
       return response.data;
     } catch (error) {
