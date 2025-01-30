@@ -35,8 +35,7 @@ async function getFunctionName(func: AssistantTool): Promise<{name: string, enab
   if (func.type === 'function') {
     let isEnabled = false;
     try {
-     isEnabled = await isFunctionName(func.function.name);
-     //isEnabled = true;
+     isEnabled = true; // All functions are considered available for external API calls
     } catch (error) {
       
     }
